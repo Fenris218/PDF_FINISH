@@ -1,0 +1,235 @@
+@startuml MVC_Architecture_PDF_Conversion
+
+skinparam backgroundColor #FFFFFF
+skinparam DefaultFontName Arial
+skinparam DefaultFontSize 11
+skinparam RoundCorner 10
+skinparam shadowing false
+
+' Define colors matching reference image
+skinparam package {
+    BackgroundColor<<View>> #E3F2FD
+    BorderColor<<View>> #1976D2
+    BackgroundColor<<Controller>> #FFF3E0
+    BorderColor<<Controller>> #F57C00
+    BackgroundColor<<Bean>> #C8E6C9
+    BorderColor<<Bean>> #2E7D32
+    BackgroundColor<<BO>> #FFF9C4
+    BorderColor<<BO>> #F9A825
+    BackgroundColor<<DAO>> #F3E5F5
+    BorderColor<<DAO>> #7B1FA2
+    BackgroundColor<<Database>> #FFEBEE
+    BorderColor<<Database>> #C62828
+}
+
+skinparam class {
+    BackgroundColor #FAFAFA
+    BorderColor #666666
+    ArrowColor #333333
+}
+
+title Thiết kế Mô hình MVC - Hệ thống Chuyển đổi PDF sang DOCX
+
+package "View (JSP)" <<View>> {
+    class "index.jsp" as JSPIndex {
+        + Form upload file
+        + Hiển thị thông báo
+    }
+    
+    class "viewListConvert.jsp" as JSPViewList {
+        + Danh sách chuyển đổi
+        + Trạng thái real-time
+    }
+    
+    class "login-modal.jsp" as JSPLogin {
+        + Form đăng nhập
+    }
+    
+    class "signup-modal.jsp" as JSPSignup {
+        + Form đăng ký
+    }
+    
+    class "header.jsp" as JSPHeader {
+        + Header chung
+    }
+}
+
+package "Controller (Servlet)" <<Controller>> {
+    class ConverterServlet {
+        + doPost()
+        - handleFileUpload()
+        - addToQueue()
+    }
+    
+    class ListConvertServlet {
+        + doGet()
+        - getConversionList()
+    }
+    
+    class LoginServlet {
+        + doPost()
+        - handleLogin()
+        - handleSignup()
+    }
+    
+    class DownloadFileServlet {
+        + doGet()
+        - streamFile()
+    }
+}
+
+package "Model" {
+    package "BEAN (Data Objects)" <<Bean>> {
+        class User {
+            - username: String
+            - password: String
+            - email: String
+            + getters/setters
+        }
+        
+        class Upload {
+            - id: int
+            - username: String
+            - fileNameUpload: String
+            - fileNameOutput: String
+            - status: String
+            - date: Timestamp
+            + getters/setters
+        }
+        
+        class ConversionTask {
+            - taskId: int
+            - username: String
+            - inputFilePath: String
+            - outputFilePath: String
+            - uploadId: int
+            + getters/setters
+        }
+    }
+    
+    package "BO (Business Logic)" <<BO>> {
+        class LoginBO {
+            - dao: LoginDAO
+            + checkLogin()
+            + addUser()
+        }
+        
+        class ConverterBO {
+            - dao: ConverterDAO
+            + saveHistory()
+            + getListFileConvert()
+            + updateStatus()
+        }
+        
+        class ConversionQueue {
+            - {static} instance
+            - queue: BlockingQueue
+            - worker: Thread
+            + {static} getInstance()
+            + addTask()
+        }
+        
+        class ConversionWorker {
+            - queue: BlockingQueue
+            + run()
+            - processTask()
+        }
+        
+        class PdfConvertionHelper {
+            + convertPdfToDocx()
+            - loadPdf()
+            - saveDocx()
+        }
+    }
+    
+    package "DAO (Data Access)" <<DAO>> {
+        class LoginDAO {
+            + checkLogin()
+            + addUser()
+            + userExists()
+        }
+        
+        class ConverterDAO {
+            + saveHistory()
+            + getListFileConvert()
+            + updateStatus()
+        }
+    }
+}
+
+package "Database (MySQL)" <<Database>> {
+    class "users table" as UsersTable {
+        + username (PK)
+        + password
+        + email
+        + created_at
+    }
+    
+    class "uploads table" as UploadsTable {
+        + id (PK, AI)
+        + username (FK)
+        + fileNameUpload
+        + fileNameOutput
+        + status
+        + date
+    }
+}
+
+' View to Controller relationships
+JSPIndex -down-> ConverterServlet : "HTTP POST\n(upload file)"
+JSPViewList -down-> ListConvertServlet : "HTTP GET\n(view list)"
+JSPLogin -down-> LoginServlet : "HTTP POST\n(login)"
+JSPSignup -down-> LoginServlet : "HTTP POST\n(signup)"
+
+' Controller to View relationships
+ConverterServlet .up.> JSPIndex : "forward\n(response)"
+ListConvertServlet .up.> JSPViewList : "forward\n(data)"
+LoginServlet .up.> JSPIndex : "redirect"
+
+' Controller to Model relationships
+ConverterServlet -down-> ConverterBO : "saveHistory()"
+ConverterServlet -down-> ConversionQueue : "addTask()"
+ListConvertServlet -down-> ConverterBO : "getList()"
+LoginServlet -down-> LoginBO : "checkLogin()\naddUser()"
+
+' BO relationships
+LoginBO -down-> LoginDAO : "use"
+ConverterBO -down-> ConverterDAO : "use"
+ConversionQueue -right-> ConversionWorker : "manage"
+ConversionWorker -up-> ConverterBO : "updateStatus()"
+ConversionWorker -right-> PdfConvertionHelper : "convert()"
+
+' BO to BEAN relationships
+ConverterBO .right.> Upload : "use"
+ConverterBO .right.> ConversionTask : "use"
+LoginBO .right.> User : "use"
+ConversionQueue .down.> ConversionTask : "use"
+
+' DAO to Database relationships
+LoginDAO -down-> UsersTable : "SELECT\nINSERT"
+ConverterDAO -down-> UploadsTable : "SELECT\nINSERT\nUPDATE"
+
+' Database relationship
+UsersTable -right-> UploadsTable : "1:N\n(username)"
+
+note right of ConversionQueue
+    Singleton Pattern
+    Thread-safe Queue
+    Asynchronous Processing
+end note
+
+note bottom of ConversionWorker
+    Background Thread
+    Processes tasks from queue
+    Updates status in database
+end note
+
+note bottom of UploadsTable
+    Status values:
+    - queued
+    - processing
+    - completed
+    - failed
+end note
+
+@enduml
