@@ -40,11 +40,12 @@ public class ConversionQueue {
 		try {
 			queue.put(task);
 			System.out.println("Task " + taskId + " added to queue. Queue size: " + queue.size());
+			return taskId;
 		} catch (InterruptedException e) {
 			System.err.println("Error adding task to queue: " + e.getMessage());
 			Thread.currentThread().interrupt();
+			return -1; // Indicate failure
 		}
-		return taskId;
 	}
 
 	public int getQueueSize() {
@@ -54,6 +55,19 @@ public class ConversionQueue {
 	public void shutdown() {
 		if (executorService != null) {
 			executorService.shutdown();
+			try {
+				// Wait for running tasks to complete (30 seconds timeout)
+				if (!executorService.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)) {
+					// Force shutdown if tasks don't complete in time
+					executorService.shutdownNow();
+					System.out.println("ConversionQueue forced shutdown after timeout");
+				} else {
+					System.out.println("ConversionQueue shutdown gracefully");
+				}
+			} catch (InterruptedException e) {
+				executorService.shutdownNow();
+				Thread.currentThread().interrupt();
+			}
 		}
 	}
 }
