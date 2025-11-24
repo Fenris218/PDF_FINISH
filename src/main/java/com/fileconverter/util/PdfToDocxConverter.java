@@ -5,7 +5,6 @@ import com.fileconverter.bo.ConversionTaskBO;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.usermodel.*;
-import org.apache.poi.util.Units;
 
 import java.io.*;
 import java.util.regex.Pattern;

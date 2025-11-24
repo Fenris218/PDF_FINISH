@@ -240,14 +240,20 @@ public class CombineDocx {
                 // Copy runs
                 for (XWPFRun srcRun : srcParagraph.getRuns()) {
                     XWPFRun destRun = destParagraph.createRun();
-                    // Copy run properties and text
+                    // Copy run properties
                     destRun.getCTR().setRPr(srcRun.getCTR().getRPr());
-                    destRun.setText(srcRun.getText(0));
+                    
+                    // Copy all text segments from the source run
+                    String text = srcRun.text();
+                    if (text != null) {
+                        destRun.setText(text);
+                    }
                 }
             } else if (bodyElement instanceof XWPFTable) {
                 XWPFTable srcTable = (XWPFTable) bodyElement;
-                // For tables, we need to copy the CTTbl directly
-                dest.getDocument().getBody().addNewTbl().set(srcTable.getCTTbl());
+                // Create a new table and copy its structure
+                XWPFTable destTable = dest.createTable();
+                destTable.getCTTbl().set(srcTable.getCTTbl().copy());
             }
         }
     }
