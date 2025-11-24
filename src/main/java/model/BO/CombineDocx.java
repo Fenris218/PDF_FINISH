@@ -1,6 +1,8 @@
 package model.BO;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.Callable;
@@ -11,9 +13,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ExecutionException;
 
-import com.spire.doc.Document;
-import com.spire.doc.FileFormat;
-import com.spire.doc.Section;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFRun;
+import org.apache.poi.xwpf.usermodel.IBodyElement;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTBody;
 
 import utils.Utils;
 
@@ -38,7 +43,7 @@ public class CombineDocx {
             return combineInBatches(docFilePaths, output, progressCallback);
         }
 
-        Document firstDocument = null;
+        XWPFDocument firstDocument = null;
 
         try {
             // Validate all input files exist
@@ -58,8 +63,9 @@ public class CombineDocx {
             long startTime = System.currentTimeMillis();
 
             // Load first document
-            firstDocument = new Document();
-            firstDocument.loadFromFile(docFilePaths.get(0), FileFormat.Docx);
+            try (FileInputStream fis = new FileInputStream(docFilePaths.get(0))) {
+                firstDocument = new XWPFDocument(fis);
+            }
 
             if (progressCallback != null) {
                 progressCallback.onProgress(81, "Combined 1/" + docFilePaths.size() + " files");
@@ -67,17 +73,15 @@ public class CombineDocx {
 
             // Merge remaining documents
             for (int i = 1; i < docFilePaths.size(); i++) {
-                Document documentMerge = null;
+                XWPFDocument documentMerge = null;
                 try {
-                    documentMerge = new Document();
-                    documentMerge.loadFromFile(docFilePaths.get(i), FileFormat.Docx);
-
-                    // Use proper iteration instead of enhanced for loop
-                    int sectionCount = documentMerge.getSections().getCount();
-                    for (int j = 0; j < sectionCount; j++) {
-                        Section section = documentMerge.getSections().get(j);
-                        firstDocument.getSections().add(section.deepClone());
+                    try (FileInputStream fis = new FileInputStream(docFilePaths.get(i))) {
+                        documentMerge = new XWPFDocument(fis);
                     }
+
+                    // Copy all body elements from the merge document to the first document
+                    CTBody body = documentMerge.getDocument().getBody();
+                    appendBody(firstDocument, documentMerge);
 
                     // Progress update
                     if (progressCallback != null && i % 10 == 0) {
@@ -101,7 +105,9 @@ public class CombineDocx {
 
             // Save combined document
             System.out.println("Saving combined document...");
-            firstDocument.saveToFile(output, FileFormat.Docx);
+            try (FileOutputStream fos = new FileOutputStream(output)) {
+                firstDocument.write(fos);
+            }
 
             // Verify output file
             File outputFile = new File(output);
@@ -217,6 +223,33 @@ public class CombineDocx {
      */
     public static boolean combineFiles(List<String> docFilePaths, String output) {
         return combineFiles(docFilePaths, output, null);
+    }
+    
+    /**
+     * Helper method to append body elements from one document to another
+     */
+    private static void appendBody(XWPFDocument dest, XWPFDocument src) throws Exception {
+        for (IBodyElement bodyElement : src.getBodyElements()) {
+            if (bodyElement instanceof XWPFParagraph) {
+                XWPFParagraph srcParagraph = (XWPFParagraph) bodyElement;
+                XWPFParagraph destParagraph = dest.createParagraph();
+                
+                // Copy paragraph properties
+                destParagraph.getCTP().setPPr(srcParagraph.getCTP().getPPr());
+                
+                // Copy runs
+                for (XWPFRun srcRun : srcParagraph.getRuns()) {
+                    XWPFRun destRun = destParagraph.createRun();
+                    // Copy run properties and text
+                    destRun.getCTR().setRPr(srcRun.getCTR().getRPr());
+                    destRun.setText(srcRun.getText(0));
+                }
+            } else if (bodyElement instanceof XWPFTable) {
+                XWPFTable srcTable = (XWPFTable) bodyElement;
+                // For tables, we need to copy the CTTbl directly
+                dest.getDocument().getBody().addNewTbl().set(srcTable.getCTTbl());
+            }
+        }
     }
 
     /**

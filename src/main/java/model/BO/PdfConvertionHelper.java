@@ -13,8 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 
-import com.spire.pdf.FileFormat;
-import com.spire.pdf.PdfDocument;
+import com.fileconverter.util.PdfToDocxConverter;
+import com.fileconverter.bean.ConversionTask;
 
 public class PdfConvertionHelper {
     private static final int MAX_PAGES_PER_FILE = 50;
@@ -308,27 +308,27 @@ public class PdfConvertionHelper {
     }
 
     /**
-     * Convert a single PDF chunk to DOCX
+     * Convert a single PDF chunk to DOCX using PDFBox
      */
     private static String convertSingleChunk(String filePath) throws Exception {
         System.out.println("Converting: " + filePath);
 
-        PdfDocument document = null;
-        try {
-            document = new PdfDocument();
-            document.loadFromFile(filePath);
-
-            String docFilePath = filePath.replaceAll("(?i)\\.pdf$", ".docx");
-            document.saveToFile(docFilePath, FileFormat.DOCX);
-
-            System.out.println("Converted: " + filePath + " -> " + docFilePath);
-            return docFilePath;
-
-        } finally {
-            if (document != null) {
-                document.close();
-            }
+        String docFilePath = filePath.replaceAll("(?i)\\.pdf$", ".docx");
+        
+        // Create a simple conversion task for progress tracking
+        ConversionTask task = new ConversionTask(0, "system", filePath);
+        task.setOutputFilePath(docFilePath);
+        
+        // Use the new PdfToDocxConverter
+        PdfToDocxConverter converter = new PdfToDocxConverter();
+        boolean success = converter.convertPdfToDocx(task, filePath, docFilePath);
+        
+        if (!success) {
+            throw new Exception("Failed to convert " + filePath);
         }
+
+        System.out.println("Converted: " + filePath + " -> " + docFilePath);
+        return docFilePath;
     }
 
     /**
