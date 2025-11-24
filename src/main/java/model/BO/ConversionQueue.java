@@ -13,12 +13,12 @@ public class ConversionQueue {
 	private final BlockingQueue<ConversionTask> queue;
 	private final AtomicInteger taskIdCounter;
 	private final ExecutorService executorService;
-	private static final int NUM_WORKERS = 3; // Process 3 files concurrently
+	private static final int NUM_WORKERS = 6; // Process 6 files concurrently
 
 	private ConversionQueue() {
 		this.queue = new LinkedBlockingQueue<>();
 		this.taskIdCounter = new AtomicInteger(0);
-		// Create thread pool with 3 worker threads
+		// Create thread pool with 6 worker threads
 		this.executorService = Executors.newFixedThreadPool(NUM_WORKERS);
 		// Start worker threads
 		for (int i = 0; i < NUM_WORKERS; i++) {

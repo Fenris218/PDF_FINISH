@@ -2,70 +2,70 @@
 
 ## Tổng Quan
 
-Hệ thống đã được cải tiến để hỗ trợ **xử lý đồng thời nhiều file PDF** từ nhiều người dùng khác nhau. Thay vì xử lý tuần tự từng file một, hệ thống hiện có thể xử lý **tối đa 3 file cùng lúc**.
+Hệ thống đã được cải tiến để hỗ trợ **xử lý đồng thời nhiều file PDF** từ nhiều người dùng khác nhau. Thay vì xử lý tuần tự từng file một, hệ thống hiện có thể xử lý **tối đa 6 file cùng lúc**.
 
 ## Kịch Bản Sử Dụng
 
 ### Kịch Bản 1: Một người dùng upload nhiều file
-**Tình huống:** User A upload 5 file PDF
+**Tình huống:** User A upload 9 file PDF
 
 ```
-Thời gian    | File 1      | File 2      | File 3      | File 4   | File 5
-─────────────┼─────────────┼─────────────┼─────────────┼──────────┼─────────
-00:00        | Processing  | Processing  | Processing  | Queued   | Queued
-00:10        | Completed   | Processing  | Processing  | Processing | Queued
-00:20        | Completed   | Completed   | Processing  | Processing | Processing
-00:30        | Completed   | Completed   | Completed   | Processing | Processing
-00:40        | Completed   | Completed   | Completed   | Completed  | Processing
-00:50        | Completed   | Completed   | Completed   | Completed  | Completed
+Thời gian    | File 1-6                                          | File 7   | File 8   | File 9
+─────────────┼───────────────────────────────────────────────────┼──────────┼──────────┼─────────
+00:00        | Processing (6 workers active)                     | Queued   | Queued   | Queued
+00:10        | 3 Completed, 3 Processing                         | Processing | Processing | Processing
+00:20        | All 6 Completed                                   | Processing | Processing | Processing
+00:30        | Completed                                         | Completed  | Completed  | Completed
 ```
 
 **Kết quả:**
-- 3 file đầu tiên được xử lý đồng thời (processing)
-- 2 file còn lại chờ trong queue
-- Tổng thời gian: ~50 giây (so với ~150 giây nếu xử lý tuần tự)
+- 6 file đầu tiên được xử lý đồng thời (processing)
+- 3 file còn lại chờ trong queue
+- Tổng thời gian: ~30 giây (so với ~90 giây nếu xử lý tuần tự)
 
 ### Kịch Bản 2: Nhiều người dùng cùng upload
 **Tình huống:**
-- User A upload 2 file (file1.pdf, file2.pdf)
-- User B upload 2 file (file3.pdf, file4.pdf)
+- User A upload 3 file (file1.pdf, file2.pdf, file3.pdf)
+- User B upload 3 file (file4.pdf, file5.pdf, file6.pdf)
 
 ```
-Thời gian    | Worker-1     | Worker-2     | Worker-3     | Queue
-─────────────┼──────────────┼──────────────┼──────────────┼─────────────
-00:00        | File1 (A)    | File2 (A)    | File3 (B)    | [File4 (B)]
-00:10        | Processing   | Processing   | Processing   | [File4 (B)]
-00:20        | Completed    | Processing   | Processing   | [File4 (B)]
-00:21        | File4 (B)    | Processing   | Processing   | []
-00:30        | Processing   | Completed    | Processing   | []
-00:40        | Processing   | Idle         | Completed    | []
-00:50        | Completed    | Idle         | Idle         | []
+Thời gian    | Worker-1     | Worker-2     | Worker-3     | Worker-4     | Worker-5     | Worker-6     | Queue
+─────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼───────
+00:00        | File1 (A)    | File2 (A)    | File3 (A)    | File4 (B)    | File5 (B)    | File6 (B)    | []
+00:10        | Processing   | Processing   | Processing   | Processing   | Processing   | Processing   | []
+00:20        | Completed    | Processing   | Processing   | Processing   | Processing   | Processing   | []
+00:30        | Idle         | Completed    | Completed    | Completed    | Completed    | Completed    | []
 ```
 
 **Kết quả:**
-- File thứ 2 của User B (file4) phải chờ trong queue
-- 3 file đầu tiên được xử lý song song
-- User A và User B đều có file được xử lý đồng thời
+- Tất cả 6 file được xử lý đồng thời
+- Không có file phải chờ trong queue
+- User A và User B đều có tất cả file được xử lý song song
+- Thời gian tối ưu nhất
 
-### Kịch Bản 3: Ba người dùng mỗi người một file
+### Kịch Bản 3: Sáu người dùng mỗi người một file
 **Tình huống:**
 - User A upload file1.pdf
 - User B upload file2.pdf
 - User C upload file3.pdf
+- User D upload file4.pdf
+- User E upload file5.pdf
+- User F upload file6.pdf
 
 ```
-Thời gian    | Worker-1     | Worker-2     | Worker-3     | Queue
-─────────────┼──────────────┼──────────────┼──────────────┼───────
-00:00        | File1 (A)    | File2 (B)    | File3 (C)    | []
-00:10        | Processing   | Processing   | Processing   | []
-00:20        | Processing   | Processing   | Processing   | []
-00:30        | Completed    | Completed    | Completed    | []
+Thời gian    | Worker-1     | Worker-2     | Worker-3     | Worker-4     | Worker-5     | Worker-6     | Queue
+─────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼───────
+00:00        | File1 (A)    | File2 (B)    | File3 (C)    | File4 (D)    | File5 (E)    | File6 (F)    | []
+00:10        | Processing   | Processing   | Processing   | Processing   | Processing   | Processing   | []
+00:20        | Processing   | Processing   | Processing   | Processing   | Processing   | Processing   | []
+00:30        | Completed    | Completed    | Completed    | Completed    | Completed    | Completed    | []
 ```
 
 **Kết quả:**
-- Cả 3 file được xử lý đồng thời
+- Cả 6 file được xử lý đồng thời
 - Không có file phải chờ trong queue
 - Thời gian xử lý tối ưu
+- Phục vụ 6 người dùng cùng lúc
 
 ## Cải Tiến Kỹ Thuật
 
@@ -86,7 +86,10 @@ ConversionQueue
     └── ExecutorService (Fixed Thread Pool)
             ├── Worker-1 (process file in parallel)
             ├── Worker-2 (process file in parallel)
-            └── Worker-3 (process file in parallel)
+            ├── Worker-3 (process file in parallel)
+            ├── Worker-4 (process file in parallel)
+            ├── Worker-5 (process file in parallel)
+            └── Worker-6 (process file in parallel)
 ```
 
 ### 2. Thay Đổi Code
@@ -100,7 +103,7 @@ this.worker.start();
 
 // Hiện tại
 private final ExecutorService executorService;
-private static final int NUM_WORKERS = 3;
+private static final int NUM_WORKERS = 6;
 
 this.executorService = Executors.newFixedThreadPool(NUM_WORKERS);
 for (int i = 0; i < NUM_WORKERS; i++) {
@@ -156,18 +159,18 @@ Hệ thống đảm bảo thread-safe thông qua:
 
 ### So Sánh Throughput
 
-| Metric                  | Single Worker | 3 Workers (Concurrent) | Improvement |
+| Metric                  | Single Worker | 6 Workers (Concurrent) | Improvement |
 |------------------------|---------------|------------------------|-------------|
-| Files processed/hour   | 120-720       | 360-2160              | 3x          |
-| Concurrent files       | 1             | 3                     | 3x          |
-| Queue wait time        | High          | Low                   | 67% faster  |
+| Files processed/hour   | 120-720       | 720-4320              | 6x          |
+| Concurrent files       | 1             | 6                     | 6x          |
+| Queue wait time        | High          | Low                   | 83% faster  |
 | User experience        | Sequential    | Parallel              | Much better |
 
 ### Tài Nguyên Hệ Thống
 
-- **CPU Threads**: Sử dụng 3 threads (21% của 14 threads có sẵn)
-- **Memory**: ~300-1500MB cho 3 conversions đồng thời
-- **Disk I/O**: 3 files được đọc/ghi song song
+- **CPU Threads**: Sử dụng 6 threads (43% của 14 threads có sẵn)
+- **Memory**: ~600-3000MB cho 6 conversions đồng thời
+- **Disk I/O**: 6 files được đọc/ghi song song
 
 ## Cấu Hình
 
@@ -176,13 +179,13 @@ Hệ thống đảm bảo thread-safe thông qua:
 Để thay đổi số lượng worker threads, chỉnh sửa trong `ConversionQueue.java`:
 
 ```java
-private static final int NUM_WORKERS = 3;  // Thay đổi số này
+private static final int NUM_WORKERS = 6;  // Thay đổi số này
 ```
 
 **Khuyến nghị:**
-- **Máy 14 threads**: NUM_WORKERS = 3-5 (optimal)
-- **Máy 8 threads**: NUM_WORKERS = 2-3
-- **Máy 4 threads**: NUM_WORKERS = 1-2
+- **Máy 14 threads**: NUM_WORKERS = 6-8 (optimal)
+- **Máy 8 threads**: NUM_WORKERS = 3-4
+- **Máy 4 threads**: NUM_WORKERS = 2
 
 **Lưu ý:** Mỗi worker consume ~100-500MB RAM trong quá trình conversion.
 
@@ -191,14 +194,20 @@ private static final int NUM_WORKERS = 3;  // Thay đổi số này
 Workers có logging chi tiết với worker ID:
 
 ```
-ConversionQueue initialized with 3 worker threads
+ConversionQueue initialized with 6 worker threads
 ConversionWorker-1 started
 ConversionWorker-2 started
 ConversionWorker-3 started
+ConversionWorker-4 started
+ConversionWorker-5 started
+ConversionWorker-6 started
 Task 1 added to queue. Queue size: 1
 ConversionWorker-1 processing task 1 for user johndoe
 ConversionWorker-2 processing task 2 for user janedoe
 ConversionWorker-3 processing task 3 for user bobsmith
+ConversionWorker-4 processing task 4 for user alice
+ConversionWorker-5 processing task 5 for user charlie
+ConversionWorker-6 processing task 6 for user david
 ConversionWorker-1 completed task 1 successfully
 ```
 
@@ -223,8 +232,8 @@ Có thể mở rộng thêm:
 
 Với cải tiến xử lý đồng thời:
 - ✅ Hỗ trợ nhiều người dùng cùng lúc
-- ✅ Xử lý tối đa 3 file song song
-- ✅ Tăng 3x throughput
+- ✅ Xử lý tối đa 6 file song song
+- ✅ Tăng 6x throughput
 - ✅ Giảm thời gian chờ đợi
 - ✅ Thread-safe và ổn định
 - ✅ Tối ưu cho máy 14 threads

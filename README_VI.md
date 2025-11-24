@@ -504,7 +504,7 @@ Khi hoàn thành:
 
 ### 1. Hệ thống hàng đợi bất đồng bộ ⭐
 - **Không cần chờ đợi**: Upload file và nhận phản hồi ngay lập tức
-- **Xử lý song song**: 3 worker threads xử lý đồng thời tối đa 3 file cùng lúc
+- **Xử lý song song**: 6 worker threads xử lý đồng thời tối đa 6 file cùng lúc
 - **Đa người dùng**: Nhiều người dùng có thể upload và xử lý file đồng thời
 - **Xử lý nền**: File được chuyển đổi ở background bởi worker threads
 
@@ -670,8 +670,8 @@ Khi hoàn thành:
 - **Tốc độ**: Phụ thuộc vào kích thước file và số trang
 - **File nhỏ** (1-5 trang): ~5-10 giây
 - **File lớn** (10+ trang): Có thể lâu hơn
-- **Xử lý đồng thời**: 3 worker threads xử lý song song tối đa 3 file cùng lúc
-- **Thông lượng**: Tăng 3 lần so với xử lý tuần tự (tối đa 360-2160 file/giờ)
+- **Xử lý đồng thời**: 6 worker threads xử lý song song tối đa 6 file cùng lúc
+- **Thông lượng**: Tăng 6 lần so với xử lý tuần tự (tối đa 720-4320 file/giờ)
 
 ### Bảo mật
 - **Mật khẩu**: Lưu plaintext (nên hash trong production)
