@@ -322,23 +322,26 @@ class ConversionWorker implements Runnable {
 
 ##### PdfConvertionHelper.java
 ```java
+// Simplified example showing conceptual flow
 class PdfConvertionHelper {
     private static final int MAX_PAGES_PER_FILE = 50;
     private static final int MAX_THREAD_POOL_SIZE = 12;
     private static final int RETRY_ATTEMPTS = 3;
     
     public static ConversionResult convertPdfToDoc(String fileInput) {
-        // Validate file (exists, is PDF, size < 100MB)
-        // Split PDF into chunks of 50 pages
+        // 1. Validate file (exists, is PDF, size < 100MB)
+        // 2. Split PDF into chunks of 50 pages
         List<String> chunkPdfPaths = splitPdf(fileInput);
         
-        // Convert chunks in parallel using 12-thread pool
+        // 3. Convert chunks in parallel using 12-thread pool
         List<String> docxPaths = convertChunkPdfToDocx(chunkPdfPaths);
         
-        // Combine DOCX files
+        // 4. Combine DOCX files into final output
+        String outputPath = /* generated from input */;
         boolean combined = CombineDocx.combineFiles(docxPaths, outputPath);
         
-        // Cleanup temporary files
+        // 5. Cleanup temporary files
+        List<String> tempFiles = /* PDF and DOCX chunks */;
         cleanupTempFiles(tempFiles);
         
         return ConversionResult.success(outputPath);
