@@ -18,11 +18,12 @@ The PDF Conversion System is a web-based application built using Java EE (Jakart
 
 ### Key Architectural Principles
 - **MVC Pattern**: Clear separation of concerns between Model, View, and Controller
-- **Asynchronous Processing**: Non-blocking conversion using queue and worker thread
+- **Asynchronous Processing**: Non-blocking conversion using queue and worker threads
 - **Thread Safety**: Concurrent data structures for safe multi-threaded access
 - **Database Persistence**: All conversion tasks and user data stored in MySQL
 - **Session Management**: User authentication and authorization
-- **Scalability**: Designed to handle multiple concurrent users
+- **Scalability**: Designed to handle multiple concurrent users with 6 parallel worker threads
+- **Multi-threading**: Uses ExecutorService with fixed thread pool for PDF chunk conversion
 
 ---
 
@@ -69,11 +70,24 @@ model/
 │   ├── ConverterBO.java
 │   ├── ConversionQueue.java
 │   ├── ConversionWorker.java
-│   └── PdfConvertionHelper.java
+│   ├── ConverterThread.java
+│   ├── PdfConvertionHelper.java
+│   └── CombineDocx.java
 │
 └── DAO/               # Data Access Objects (Database Operations)
     ├── LoginDAO.java
     └── ConverterDAO.java
+
+com.fileconverter/     # Additional conversion components
+├── bean/              # Conversion task beans
+│   └── ConversionTask.java
+├── bo/                # Business objects for conversion
+│   └── ConversionTaskBO.java
+└── util/              # Conversion utilities
+    └── PdfToDocxConverter.java
+
+utils/                 # Common utilities
+└── Utils.java
 ```
 
 **Responsibilities:**
@@ -335,7 +349,7 @@ class ConversionQueue {
     - queue: BlockingQueue<ConversionTask>
     - executorService: ExecutorService
     - taskIdCounter: AtomicInteger
-    - NUM_WORKERS: int = 3
+    - NUM_WORKERS: int = 6
     
     + static getInstance(): ConversionQueue
     + addTask(task): int
@@ -346,14 +360,14 @@ class ConversionQueue {
 
 **Pattern**: Singleton  
 **Thread Safety**: Yes (using AtomicInteger and BlockingQueue)
-**Concurrency**: Fixed thread pool with 3 worker threads
+**Concurrency**: Fixed thread pool with 6 worker threads
 
 **Responsibilities**:
 - Maintain single queue instance
 - Generate unique task IDs
 - Manage worker thread pool lifecycle
 - Add tasks to queue
-- Process up to 3 files concurrently
+- Process up to 6 files concurrently
 
 #### 7. ConversionWorker (Runnable)
 **File**: `model/BO/ConversionWorker.java`
@@ -371,30 +385,43 @@ class ConversionWorker implements Runnable {
 
 **Characteristics**:
 - Runnable executed by ExecutorService
-- 3 concurrent workers processing tasks in parallel
+- 6 concurrent workers processing tasks in parallel
 - Continuously polls queue for tasks
 - Handles exceptions gracefully
 - Each worker has unique ID for logging
+- Uses ConverterThread for actual PDF conversion
 
 **Responsibilities**:
 - Take tasks from queue
 - Update status to "processing"
-- Call PDF conversion helper
+- Call ConverterThread to perform conversion
 - Update status to "completed" or "failed"
+- Clean up temporary files
 - Log errors with worker identification
 
 #### 8. PdfConvertionHelper
 **File**: `model/BO/PdfConvertionHelper.java`
 
 **Dependencies**:
-- Spire.PDF (com.spire.pdf)
-- Spire.Doc (com.spire.doc)
+- Apache PDFBox (org.apache.pdfbox)
+- Apache POI (org.apache.poi)
+- PdfToDocxConverter (com.fileconverter.util)
+
+**Key Features**:
+- PDF splitting into 50-page chunks
+- Parallel conversion using thread pool (12 threads)
+- Retry mechanism with exponential backoff (3 attempts)
+- Progress tracking and callbacks
+- Automatic cleanup of temporary files
+- File size validation (max 100MB)
+- Timeout protection (10 min per chunk, 30 min total)
 
 **Responsibilities**:
-- Load PDF file using Spire.PDF
-- Convert PDF to DOC format
-- Save as DOCX file
-- Handle conversion errors
+- Split large PDF files into manageable chunks
+- Convert PDF chunks to DOCX using parallel processing
+- Combine DOCX chunks into final document
+- Handle conversion errors and retries
+- Manage resource cleanup
 
 #### 9. LoginDAO
 **File**: `model/DAO/LoginDAO.java`
@@ -545,9 +572,9 @@ ConversionQueue.getInstance() (First Access)
        │
        ├─► Create BlockingQueue
        │
-       ├─► Create ExecutorService (FixedThreadPool with 3 threads)
+       ├─► Create ExecutorService (FixedThreadPool with 6 threads)
        │
-       └─► Submit 3 ConversionWorker runnables
+       └─► Submit 6 ConversionWorker runnables
               │
               ├─► Worker-1 starts
               │      │
@@ -563,23 +590,28 @@ ConversionQueue.getInstance() (First Access)
               │             processTask(task);
               │          }
               │
-              └─► Worker-3 starts (parallel)
-                     │
-                     └─► while(!interrupted) {
-                            task = queue.take();
-                            processTask(task);
-                         }
+              ├─► Worker-3 starts (parallel)
+              │      │
+              │      └─► while(!interrupted) {
+              │             task = queue.take();
+              │             processTask(task);
+              │          }
+              │
+              ├─► Worker-4 starts (parallel)
+              ├─► Worker-5 starts (parallel)
+              └─► Worker-6 starts (parallel)
        
-(All 3 workers continue until ExecutorService shutdown)
+(All 6 workers continue until ExecutorService shutdown)
 ```
 
 **Key Points:**
-- **3 worker threads**: Process up to 3 files concurrently
+- **6 worker threads**: Process up to 6 files concurrently
 - **Thread pool**: Managed by ExecutorService for efficient resource usage
 - **Eager initialization**: All workers start when queue is first accessed
 - **Never stops**: Workers run for lifetime of application
 - **Blocking**: Uses `queue.take()` which blocks when empty (efficient)
 - **Concurrent processing**: Multiple users can have files processed simultaneously
+- **Additional thread pool**: PdfConvertionHelper uses separate 12-thread pool for chunk processing
 
 ---
 
@@ -1028,25 +1060,29 @@ if (username == null) {
 ### Scalability Considerations
 
 **Current Implementation:**
-- **3 concurrent worker threads**: Process up to 3 files simultaneously
-- **Thread pool**: Fixed pool size of 3 workers for optimal performance
+- **6 concurrent worker threads**: Process up to 6 files simultaneously
+- **Thread pool**: Fixed pool size of 6 workers for optimal performance
+- **Additional thread pool**: 12 threads for parallel chunk conversion
 - **In-memory queue**: Thread-safe BlockingQueue (not persistent)
 - **File storage**: Local filesystem
 - **Concurrent users**: Multiple users can upload and process files simultaneously
 
 **Current Capabilities:**
-- Throughput: 3x improvement over single-threaded processing
+- Throughput: 6x improvement over single-threaded processing
+- Additional 12x parallelization for chunk processing
 - Can handle multiple users simultaneously
 - Files processed in FIFO order by available workers
-- Optimal for machines with 14+ threads (uses ~21% of available threads)
+- Supports large PDFs through chunking (50 pages per chunk)
+- Retry mechanism with exponential backoff for reliability
 
 **Scaling Options:**
 
 1. **Vertical Scaling**:
    - Increase server RAM/CPU
-   - Increase worker thread count (currently set to 3)
+   - Increase worker thread count (currently set to 6)
    - Adjust NUM_WORKERS constant in ConversionQueue.java
-   - Larger thread pool
+   - Increase chunk thread pool size (currently set to 12)
+   - Adjust MAX_THREAD_POOL_SIZE in PdfConvertionHelper.java
 
 2. **Horizontal Scaling** (requires architecture changes):
    - Replace in-memory queue with Redis/RabbitMQ

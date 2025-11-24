@@ -124,21 +124,37 @@ package "Model" {
         class ConversionQueue {
             - {static} instance
             - queue: BlockingQueue
-            - worker: Thread
+            - executorService: ExecutorService
+            - NUM_WORKERS: int = 6
             + {static} getInstance()
             + addTask()
         }
         
         class ConversionWorker {
             - queue: BlockingQueue
+            - workerId: int
             + run()
             - processTask()
         }
         
+        class ConverterThread {
+            - filePath: String
+            + run()
+        }
+        
         class PdfConvertionHelper {
+            + convertPdfToDoc()
+            - splitPdf()
+            - convertChunkPdfToDocx()
+            - combineDocxFiles()
+        }
+        
+        class CombineDocx {
+            + combineFiles()
+        }
+        
+        class PdfToDocxConverter {
             + convertPdfToDocx()
-            - loadPdf()
-            - saveDocx()
         }
     }
     
@@ -195,9 +211,12 @@ LoginServlet -down-> LoginBO : "checkLogin()\naddUser()"
 ' BO relationships
 LoginBO -down-> LoginDAO : "use"
 ConverterBO -down-> ConverterDAO : "use"
-ConversionQueue -right-> ConversionWorker : "manage"
+ConversionQueue -right-> ConversionWorker : "manage (6 workers)"
 ConversionWorker -up-> ConverterBO : "updateStatus()"
-ConversionWorker -right-> PdfConvertionHelper : "convert()"
+ConversionWorker -right-> ConverterThread : "start()"
+ConverterThread -down-> PdfConvertionHelper : "convert()"
+PdfConvertionHelper -down-> PdfToDocxConverter : "use"
+PdfConvertionHelper -down-> CombineDocx : "combine()"
 
 ' BO to BEAN relationships
 ConverterBO .right.> Upload : "use"
@@ -216,12 +235,24 @@ note right of ConversionQueue
     Singleton Pattern
     Thread-safe Queue
     Asynchronous Processing
+    6 Worker Threads
+    ExecutorService Pool
 end note
 
 note bottom of ConversionWorker
-    Background Thread
+    Runnable (not Thread)
+    6 concurrent workers
     Processes tasks from queue
     Updates status in database
+    Uses ConverterThread
+end note
+
+note bottom of PdfConvertionHelper
+    Splits PDF (50 pages/chunk)
+    Parallel conversion (12 threads)
+    Retry with exponential backoff
+    Automatic cleanup
+    Timeout protection
 end note
 
 note bottom of UploadsTable

@@ -228,12 +228,18 @@ class ConverterBO {
 class ConversionQueue {
     private static ConversionQueue instance;
     private BlockingQueue<ConversionTask> queue;
-    private ConversionWorker worker;
+    private ExecutorService executorService;
     private AtomicInteger taskIdCounter;
+    private static final int NUM_WORKERS = 6;
     
     private ConversionQueue() {
         queue = new LinkedBlockingQueue<>();
         taskIdCounter = new AtomicInteger(0);
+        executorService = Executors.newFixedThreadPool(NUM_WORKERS);
+        // Start 6 worker threads
+        for (int i = 0; i < NUM_WORKERS; i++) {
+            executorService.submit(new ConversionWorker(queue, i + 1));
+        }
     }
     
     public static synchronized ConversionQueue getInstance() {
@@ -244,13 +250,9 @@ class ConversionQueue {
     }
     
     public int addTask(ConversionTask task) {
-        int taskId = taskIdCounter.getAndIncrement();
-        task.setTaskId(taskId);
+        int taskId = taskIdCounter.incrementAndGet();
+        task.setId(taskId);
         queue.put(task);
-        
-        if (worker == null) {
-            startWorker();
-        }
         return taskId;
     }
 }
@@ -259,69 +261,106 @@ class ConversionQueue {
 - Quản lý hàng đợi conversion
 - Singleton pattern - chỉ 1 instance
 - Thread-safe queue
-- Khởi động worker thread
+- Quản lý pool 6 worker threads
+- ExecutorService để quản lý vòng đời thread
 
-##### ConversionWorker.java (Thread)
+##### ConversionWorker.java (Runnable)
 ```java
-class ConversionWorker extends Thread {
+class ConversionWorker implements Runnable {
     private BlockingQueue<ConversionTask> queue;
-    private ConverterBO bo;
+    private ConverterBO converterBO;
+    private int workerId;
     
     public void run() {
-        setDaemon(true); // Daemon thread
+        String workerName = "ConversionWorker-" + workerId;
         
-        while (true) {
+        while (!Thread.currentThread().isInterrupted()) {
             try {
                 ConversionTask task = queue.take(); // Blocking
-                processTask(task);
+                processTask(task, workerName);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
     }
     
-    private void processTask(ConversionTask task) {
+    private void processTask(ConversionTask task, String workerName) {
         // Update status to "processing"
-        bo.updateStatus(task.getUploadId(), "processing");
+        converterBO.updateStatus(task.getUsername(), 
+                                task.getFileNameInServer(), "processing");
         
         try {
-            // Convert PDF to DOCX
-            PdfConvertionHelper.convertPdfToDocx(
-                task.getInputFilePath(), 
-                task.getOutputFilePath()
-            );
+            // Convert PDF to DOCX using ConverterThread
+            ConverterThread thread = new ConverterThread(task.getFilePathInServer());
+            thread.start();
+            thread.join();
+            
+            // Delete uploaded PDF file
+            Utils.deleteFile(task.getFilePathInServer());
             
             // Update status to "completed"
-            bo.updateStatus(task.getUploadId(), "completed");
+            converterBO.updateStatus(task.getUsername(), 
+                                    task.getFileNameInServer(), "completed");
         } catch (Exception e) {
             // Update status to "failed"
-            bo.updateStatus(task.getUploadId(), "failed");
+            converterBO.updateStatus(task.getUsername(), 
+                                    task.getFileNameInServer(), "failed");
         }
     }
 }
 ```
 **Chức năng:** 
-- Background thread xử lý conversion
-- Lấy task từ queue
-- Cập nhật status
-- Xử lý lỗi
+- Background thread xử lý conversion (implements Runnable)
+- Lấy task từ queue (blocking)
+- Sử dụng ConverterThread để chuyển đổi
+- Xóa file PDF gốc sau khi xử lý
+- Cập nhật status (queued → processing → completed/failed)
+- Xử lý lỗi và logging với worker ID
 
 ##### PdfConvertionHelper.java
 ```java
 class PdfConvertionHelper {
-    public static void convertPdfToDocx(String pdfPath, String docxPath) 
-        throws Exception {
-        // Sử dụng Spire.PDF library
-        PdfDocument pdf = new PdfDocument();
-        pdf.loadFromFile(pdfPath);
+    private static final int MAX_PAGES_PER_FILE = 50;
+    private static final int MAX_THREAD_POOL_SIZE = 12;
+    private static final int RETRY_ATTEMPTS = 3;
+    
+    public static ConversionResult convertPdfToDoc(String fileInput) {
+        // Validate file (exists, is PDF, size < 100MB)
+        // Split PDF into chunks of 50 pages
+        List<String> chunkPdfPaths = splitPdf(fileInput);
         
-        // Chuyển đổi sang DOC
-        pdf.saveToFile(docxPath, FileFormat.DOCX);
-        pdf.close();
+        // Convert chunks in parallel using 12-thread pool
+        List<String> docxPaths = convertChunkPdfToDocx(chunkPdfPaths);
+        
+        // Combine DOCX files
+        boolean combined = CombineDocx.combineFiles(docxPaths, outputPath);
+        
+        // Cleanup temporary files
+        cleanupTempFiles(tempFiles);
+        
+        return ConversionResult.success(outputPath);
+    }
+    
+    private static List<String> convertChunkPdfToDocx(List<String> chunks) {
+        ExecutorService executor = Executors.newFixedThreadPool(MAX_THREAD_POOL_SIZE);
+        // Submit conversion tasks with retry logic
+        // Each chunk converted by PdfToDocxConverter
+        // Wait with timeout (10 min per chunk, 30 min total)
+        return docxPaths;
     }
 }
 ```
-**Chức năng:** Thực hiện chuyển đổi PDF → DOCX
+**Chức năng:** 
+- Chia PDF thành chunks (50 trang/chunk)
+- Chuyển đổi song song với 12 threads
+- Retry mechanism (3 lần, exponential backoff)
+- Kết hợp DOCX chunks thành file cuối
+- Quản lý timeout (10 phút/chunk, 30 phút tổng)
+- Dọn dẹp file tạm tự động
+- Validation: kiểm tra file tồn tại, định dạng PDF, kích thước < 100MB
 
 **Trách nhiệm BO Layer:**
 - Chứa business logic
@@ -621,13 +660,13 @@ USER → login-modal.jsp (VIEW)
 ## Công nghệ sử dụng
 
 - **Language**: Java 17+
-- **Web Framework**: Java Servlet & JSP
+- **Web Framework**: Java Servlet & JSP (Jakarta EE 6.0)
 - **App Server**: Apache Tomcat 10
 - **Database**: MySQL 5.7+
 - **Build Tool**: Apache Maven
-- **PDF Library**: Spire.PDF Free
-- **Doc Library**: Spire.Doc Free
-- **JDBC Driver**: MySQL Connector/J
+- **PDF Library**: Apache PDFBox 2.0.30
+- **Doc Library**: Apache POI 5.2.5
+- **JDBC Driver**: MySQL Connector/J 9.5.0
 
 ---
 
