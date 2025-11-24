@@ -3,6 +3,8 @@ package model.BO;
 import model.BEAN.ConversionTask;
 
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -10,14 +12,19 @@ public class ConversionQueue {
 	private static ConversionQueue instance;
 	private final BlockingQueue<ConversionTask> queue;
 	private final AtomicInteger taskIdCounter;
-	private ConversionWorker worker;
+	private final ExecutorService executorService;
+	private static final int NUM_WORKERS = 3; // Process 3 files concurrently
 
 	private ConversionQueue() {
 		this.queue = new LinkedBlockingQueue<>();
 		this.taskIdCounter = new AtomicInteger(0);
-		// Start the background worker
-		this.worker = new ConversionWorker(queue);
-		this.worker.start();
+		// Create thread pool with 3 worker threads
+		this.executorService = Executors.newFixedThreadPool(NUM_WORKERS);
+		// Start worker threads
+		for (int i = 0; i < NUM_WORKERS; i++) {
+			executorService.submit(new ConversionWorker(queue, i + 1));
+		}
+		System.out.println("ConversionQueue initialized with " + NUM_WORKERS + " worker threads");
 	}
 
 	public static synchronized ConversionQueue getInstance() {
@@ -45,8 +52,8 @@ public class ConversionQueue {
 	}
 
 	public void shutdown() {
-		if (worker != null) {
-			worker.shutdown();
+		if (executorService != null) {
+			executorService.shutdown();
 		}
 	}
 }

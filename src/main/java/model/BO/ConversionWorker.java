@@ -5,38 +5,41 @@ import utils.Utils;
 
 import java.util.concurrent.BlockingQueue;
 
-public class ConversionWorker extends Thread {
+public class ConversionWorker implements Runnable {
 	private final BlockingQueue<ConversionTask> queue;
-	private volatile boolean running = true;
 	private final ConverterBO converterBO;
+	private final int workerId;
 
-	public ConversionWorker(BlockingQueue<ConversionTask> queue) {
+	public ConversionWorker(BlockingQueue<ConversionTask> queue, int workerId) {
 		this.queue = queue;
 		this.converterBO = new ConverterBO();
-		this.setDaemon(true); // Make it a daemon thread
-		this.setName("ConversionWorker");
+		this.workerId = workerId;
 	}
 
 	@Override
 	public void run() {
-		System.out.println("ConversionWorker started");
-		while (running) {
+		String workerName = "ConversionWorker-" + workerId;
+		System.out.println(workerName + " started");
+		
+		while (!Thread.currentThread().isInterrupted()) {
 			try {
 				ConversionTask task = queue.take();
-				processTask(task);
+				processTask(task, workerName);
 			} catch (InterruptedException e) {
-				System.err.println("ConversionWorker interrupted: " + e.getMessage());
+				System.out.println(workerName + " interrupted, shutting down");
 				Thread.currentThread().interrupt();
 				break;
 			} catch (Exception e) {
-				System.err.println("Error processing task: " + e.getMessage());
+				System.err.println(workerName + " error processing task: " + e.getMessage());
+				e.printStackTrace();
 			}
 		}
-		System.out.println("ConversionWorker stopped");
+		
+		System.out.println(workerName + " stopped");
 	}
 
-	private void processTask(ConversionTask task) {
-		System.out.println("Processing task " + task.getId() + " for user " + task.getUsername());
+	private void processTask(ConversionTask task, String workerName) {
+		System.out.println(workerName + " processing task " + task.getId() + " for user " + task.getUsername());
 		
 		// Update status to processing
 		task.setStatus("processing");
@@ -55,16 +58,11 @@ public class ConversionWorker extends Thread {
 			task.setStatus("completed");
 			converterBO.updateStatus(task.getUsername(), task.getFileNameInServer(), "completed");
 
-			System.out.println("Task " + task.getId() + " completed successfully");
+			System.out.println(workerName + " completed task " + task.getId() + " successfully");
 		} catch (Exception e) {
-			System.err.println("Task " + task.getId() + " failed: " + e.getMessage());
+			System.err.println(workerName + " task " + task.getId() + " failed: " + e.getMessage());
 			task.setStatus("failed");
 			converterBO.updateStatus(task.getUsername(), task.getFileNameInServer(), "failed");
 		}
-	}
-
-	public void shutdown() {
-		running = false;
-		this.interrupt();
 	}
 }
