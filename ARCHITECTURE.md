@@ -227,7 +227,7 @@ controller/
 │  │  ┌──────────────┐          ┌──────────────┐                 │
 │  └─►│Conversion    │─────────►│PdfConversion │                 │
 │     │Worker        │          │Helper        │                 │
-│     │(Background)  │          │(Spire APIs)  │                 │
+│     │(Background)  │          │(PDFBox/POI)  │                 │
 │     └──────────────┘          └──────────────┘                 │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ SQL Queries
@@ -399,6 +399,36 @@ class ConversionWorker implements Runnable {
 - Clean up temporary files
 - Log errors with worker identification
 
+#### 7.5. ConverterThread (Thread Wrapper)
+**File**: `model/BO/ConverterThread.java`
+
+```java
+class ConverterThread extends Thread {
+    - filePath: String
+    
+    + run(): void
+}
+```
+
+**Purpose**: Lightweight thread wrapper for asynchronous conversion
+**Pattern**: Simple thread wrapper to run conversion in separate thread
+
+**Responsibilities**:
+- Start conversion process asynchronously
+- Delegate actual conversion to PdfConvertionHelper
+- Isolate conversion logic from worker thread
+
+**Flow**:
+```
+ConversionWorker
+    ↓
+ConverterThread.start()
+    ↓
+PdfConvertionHelper.convertPdfToDoc()
+    ↓
+Conversion complete
+```
+
 #### 8. PdfConvertionHelper
 **File**: `model/BO/PdfConvertionHelper.java`
 
@@ -422,6 +452,47 @@ class ConversionWorker implements Runnable {
 - Combine DOCX chunks into final document
 - Handle conversion errors and retries
 - Manage resource cleanup
+
+#### 8.5. PdfToDocxConverter
+**File**: `com/fileconverter/util/PdfToDocxConverter.java`
+
+```java
+class PdfToDocxConverter {
+    - conversionTaskBO: ConversionTaskBO
+    
+    + convertPdfToDocx(task, inputPath, outputPath): boolean
+    - simulateConversion(task, inputPath, outputPath): boolean
+    - isLikelyHeading(text): boolean
+}
+```
+
+**Purpose**: Core PDF to DOCX conversion logic using Apache libraries
+
+**Responsibilities**:
+- Load PDF using Apache PDFBox
+- Extract text and structure from PDF
+- Create DOCX document using Apache POI
+- Apply formatting (headings, paragraphs, fonts)
+- Update conversion progress (0% → 25% → 95%)
+- Handle text parsing and heuristic heading detection
+
+**Key Features**:
+- Text extraction with position-based sorting
+- Automatic heading detection (uppercase, colons, numbered)
+- Paragraph formatting with font styles
+- Document metadata preservation
+- Progress tracking with ConversionTaskBO
+
+#### 8.6. CombineDocx
+**File**: `model/BO/CombineDocx.java`
+
+**Purpose**: Merge multiple DOCX files into one
+
+**Responsibilities**:
+- Combine DOCX chunk files in order
+- Preserve formatting across chunks
+- Handle page breaks between chunks
+- Ensure document integrity
 
 #### 9. LoginDAO
 **File**: `model/DAO/LoginDAO.java`
@@ -1010,9 +1081,9 @@ if (username == null) {
 │       │   │   ├── model/
 │       │   │   └── utils/
 │       │   ├── lib/                  # JAR dependencies
-│       │   │   ├── mysql-connector.jar
-│       │   │   ├── Spire.Pdf.jar
-│       │   │   └── Spire.Doc.jar
+│       │   │   ├── mysql-connector-j.jar
+│       │   │   ├── pdfbox.jar
+│       │   │   └── poi-ooxml.jar
 │       │   └── web.xml               # Deployment descriptor
 │       ├── uploads/                  # User uploaded files
 │       │   ├── *.pdf
@@ -1113,6 +1184,6 @@ The system is production-ready for small to medium loads, with clear paths for s
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2025-11-16  
+**Document Version**: 1.1  
+**Last Updated**: 2025-11-24  
 **Author**: PDF Conversion Development Team
