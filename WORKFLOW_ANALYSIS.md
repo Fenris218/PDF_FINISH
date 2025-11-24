@@ -1082,35 +1082,55 @@ status = 'completed'
 
 ---
 
-### Case 2: Multiple concurrent uploads
+### Case 2: Multiple concurrent uploads (3 Worker Threads)
 
 **Scenario:**
-- User A uploads file1.pdf
-- User B uploads file2.pdf (1 second later)
-- User C uploads file3.pdf (2 seconds later)
+- User A uploads file1.pdf at 00:01
+- User B uploads file2.pdf at 00:02 (1 second later)
+- User C uploads file3.pdf at 00:03 (2 seconds later)
 
-**Queue behavior:**
+**Queue behavior with 3 concurrent workers:**
 ```
-Time   | Queue State              | Worker Activity
-────────┼──────────────────────────┼────────────────────────────
-00:00  │ []                       │ Idle (sleeping)
-00:01  │ [Task#1(A, file1.pdf)]   │ Wake up, take Task#1
-00:02  │ []                       │ Processing Task#1...
-00:03  │ [Task#2(B, file2.pdf)]   │ Still processing Task#1...
-00:04  │ [Task#2]                 │ Still processing Task#1...
-00:15  │ [Task#2]                 │ Task#1 complete!
-00:16  │ [Task#2, Task#3(C)]      │ Take Task#2
-00:17  │ [Task#3]                 │ Processing Task#2...
-00:30  │ [Task#3]                 │ Task#2 complete!
-00:31  │ []                       │ Take Task#3
-00:32  │ []                       │ Processing Task#3...
-00:45  │ []                       │ Task#3 complete! Back to idle
+Time   | Queue State              | Worker-1         | Worker-2         | Worker-3
+────────┼──────────────────────────┼──────────────────┼──────────────────┼─────────────────
+00:00  │ []                       │ Idle             │ Idle             │ Idle
+00:01  │ [Task#1(A, file1.pdf)]   │ Take Task#1      │ Idle             │ Idle
+00:02  │ []                       │ Processing #1... │ Idle             │ Idle
+00:03  │ [Task#2(B, file2.pdf)]   │ Processing #1... │ Take Task#2      │ Idle
+00:04  │ []                       │ Processing #1... │ Processing #2... │ Idle
+00:05  │ [Task#3(C, file3.pdf)]   │ Processing #1... │ Processing #2... │ Take Task#3
+00:06  │ []                       │ Processing #1... │ Processing #2... │ Processing #3...
+00:15  │ []                       │ Task#1 complete! │ Processing #2... │ Processing #3...
+00:16  │ []                       │ Idle             │ Processing #2... │ Processing #3...
+00:20  │ []                       │ Idle             │ Task#2 complete! │ Processing #3...
+00:21  │ []                       │ Idle             │ Idle             │ Processing #3...
+00:25  │ []                       │ Idle             │ Idle             │ Task#3 complete!
+00:26  │ []                       │ Idle             │ Idle             │ Idle
 ```
 
 **Điểm quan trọng:**
-- Tasks được xử lý **tuần tự** (FIFO)
+- Tasks được xử lý **song song** bởi 3 workers
 - User A, B, C đều nhận response "Đang thực hiện" ngay lập tức
-- File2 và file3 phải chờ file1 xong mới được xử lý
+- Tất cả 3 files được xử lý đồng thời (concurrent processing)
+- Tổng thời gian: ~25 giây (so với ~45 giây nếu xử lý tuần tự)
+- Tăng 3x throughput so với single worker
+
+**Scenario mở rộng: 5 users upload files**
+```
+Time   | Queue            | Worker-1      | Worker-2      | Worker-3
+────────┼──────────────────┼───────────────┼───────────────┼──────────────
+00:00  │ [T1,T2,T3,T4,T5] │ Take T1       │ Take T2       │ Take T3
+00:01  │ [T4,T5]          │ Process T1... │ Process T2... │ Process T3...
+00:10  │ [T4,T5]          │ T1 done       │ Process T2... │ Process T3...
+00:11  │ [T5]             │ Take T4       │ Process T2... │ Process T3...
+00:12  │ [T5]             │ Process T4... │ Process T2... │ Process T3...
+00:15  │ [T5]             │ Process T4... │ T2 done       │ Process T3...
+00:16  │ []               │ Process T4... │ Take T5       │ Process T3...
+00:17  │ []               │ Process T4... │ Process T5... │ Process T3...
+```
+- File 1, 2, 3: Xử lý ngay (processing)
+- File 4, 5: Chờ trong queue (queued)
+- Khi worker rảnh → lấy task từ queue
 
 ---
 
@@ -1303,60 +1323,65 @@ CREATE TABLE error_logs (
 ### 10.1. Current Performance Characteristics
 
 **Throughput:**
-- Sequential processing: 1 file at a time
+- Concurrent processing: 3 files at a time (parallel)
 - Average conversion time: 5-30 seconds per file
-- Theoretical maximum: ~120-720 files/hour
+- Theoretical maximum: ~360-2160 files/hour (3x improvement)
+- Actual throughput depends on file size and system resources
 
 **Latency:**
 - User response time: 50-200ms (chỉ tính upload, không tính conversion)
 - Conversion time: Tùy file size và complexity
 
 **Resource usage:**
-- Threads: 1 worker thread (minimal overhead)
+- Threads: 3 worker threads from fixed thread pool
 - Memory: Depends on Spire library (typically 100-500MB per conversion)
-- Disk I/O: Read PDF + Write DOCX + Delete PDF
+- Total memory for 3 concurrent conversions: ~300-1500MB
+- Disk I/O: Read PDF + Write DOCX + Delete PDF (3 files in parallel)
 
 ### 10.2. Bottlenecks
 
-**1. Single worker thread**
-- Chỉ xử lý 1 file tại một thời điểm
-- Large queue → long wait times
+**1. Fixed thread pool size** ✅ RESOLVED
+- ~~Chỉ xử lý 1 file tại một thời điểm~~ → Now processes 3 files concurrently
+- ~~Large queue → long wait times~~ → Reduced wait times with parallel processing
+- Can be further optimized by increasing NUM_WORKERS constant
 
 **2. Synchronous conversion trong worker**
 - `thread.join()` blocks worker cho đến khi conversion xong
-- Không thể xử lý file khác cùng lúc
+- Each worker handles one file at a time (within its thread)
+- Improvement possible with async conversion (CompletableFuture)
 
 **3. Database UPDATE for each status change**
 - 2 UPDATEs per task (processing, completed)
-- Có thể optimize bằng batch updates
+- Thread-safe but could be optimized with batch updates
+- Connection pooling recommended for better performance
 
 ### 10.3. Optimization Strategies
 
-#### Strategy 1: Multiple worker threads
+#### Strategy 1: Multiple worker threads ✅ IMPLEMENTED
 
-**Current:**
+**Previous (Single worker):**
 ```java
 private ConversionWorker worker;  // Single worker
 ```
 
-**Optimized:**
+**Current Implementation (3 workers):**
 ```java
 private final ExecutorService executorService;
-private static final int NUM_WORKERS = 4;  // 4 parallel workers
+private static final int NUM_WORKERS = 3;  // 3 parallel workers
 
 private ConversionQueue() {
     this.queue = new LinkedBlockingQueue<>();
     this.executorService = Executors.newFixedThreadPool(NUM_WORKERS);
     
-    // Start 4 workers
+    // Start 3 workers
     for (int i = 0; i < NUM_WORKERS; i++) {
-        executorService.submit(new ConversionWorker(queue));
+        executorService.submit(new ConversionWorker(queue, i + 1));
     }
 }
 ```
 
 **Benefits:**
-- 4x throughput increase
+- 3x throughput increase
 - Better CPU utilization
 - Reduced wait times
 
