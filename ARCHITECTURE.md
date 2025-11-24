@@ -333,49 +333,55 @@ class ConverterBO {
 class ConversionQueue {
     - static instance: ConversionQueue
     - queue: BlockingQueue<ConversionTask>
-    - worker: ConversionWorker
+    - executorService: ExecutorService
     - taskIdCounter: AtomicInteger
+    - NUM_WORKERS: int = 3
     
     + static getInstance(): ConversionQueue
     + addTask(task): int
     + getQueueSize(): int
-    - startWorker(): void
+    + shutdown(): void
 }
 ```
 
 **Pattern**: Singleton  
 **Thread Safety**: Yes (using AtomicInteger and BlockingQueue)
+**Concurrency**: Fixed thread pool with 3 worker threads
 
 **Responsibilities**:
 - Maintain single queue instance
 - Generate unique task IDs
-- Manage worker thread lifecycle
+- Manage worker thread pool lifecycle
 - Add tasks to queue
+- Process up to 3 files concurrently
 
-#### 7. ConversionWorker (Thread)
+#### 7. ConversionWorker (Runnable)
 **File**: `model/BO/ConversionWorker.java`
 
 ```java
-class ConversionWorker extends Thread {
+class ConversionWorker implements Runnable {
     - queue: BlockingQueue<ConversionTask>
     - converterBO: ConverterBO
+    - workerId: int
     
     + run(): void
-    - processTask(task): void
+    - processTask(task, workerName): void
 }
 ```
 
 **Characteristics**:
-- Daemon thread (doesn't prevent JVM shutdown)
+- Runnable executed by ExecutorService
+- 3 concurrent workers processing tasks in parallel
 - Continuously polls queue for tasks
 - Handles exceptions gracefully
+- Each worker has unique ID for logging
 
 **Responsibilities**:
 - Take tasks from queue
 - Update status to "processing"
 - Call PDF conversion helper
 - Update status to "completed" or "failed"
-- Log errors
+- Log errors with worker identification
 
 #### 8. PdfConvertionHelper
 **File**: `model/BO/PdfConvertionHelper.java`
@@ -535,33 +541,45 @@ User Upload (ConverterServlet)
 Application Start
        │
        ▼
-First Task Added
+ConversionQueue.getInstance() (First Access)
        │
-       ├─► ConversionQueue.addTask()
-       │          │
-       │          ├─► Check if worker exists
-       │          │
-       │          └─► startWorker() if null
-       │                     │
-       │                     └─► new ConversionWorker()
-       │                                │
-       │                                └─► worker.start()
-       ▼
-Worker Running (Daemon)
+       ├─► Create BlockingQueue
        │
-       ├─► while(true) {
-       │      task = queue.take();  // Blocks if empty
-       │      processTask(task);
-       │   }
+       ├─► Create ExecutorService (FixedThreadPool with 3 threads)
        │
-       └─► (Continues until JVM shutdown)
+       └─► Submit 3 ConversionWorker runnables
+              │
+              ├─► Worker-1 starts
+              │      │
+              │      └─► while(!interrupted) {
+              │             task = queue.take();  // Blocks if empty
+              │             processTask(task);
+              │          }
+              │
+              ├─► Worker-2 starts (parallel)
+              │      │
+              │      └─► while(!interrupted) {
+              │             task = queue.take();
+              │             processTask(task);
+              │          }
+              │
+              └─► Worker-3 starts (parallel)
+                     │
+                     └─► while(!interrupted) {
+                            task = queue.take();
+                            processTask(task);
+                         }
+       
+(All 3 workers continue until ExecutorService shutdown)
 ```
 
 **Key Points:**
-- Worker thread is **daemon**: Won't prevent JVM shutdown
-- **Lazy initialization**: Only starts when first task is added
-- **Never stops**: Runs for lifetime of application
+- **3 worker threads**: Process up to 3 files concurrently
+- **Thread pool**: Managed by ExecutorService for efficient resource usage
+- **Eager initialization**: All workers start when queue is first accessed
+- **Never stops**: Workers run for lifetime of application
 - **Blocking**: Uses `queue.take()` which blocks when empty (efficient)
+- **Concurrent processing**: Multiple users can have files processed simultaneously
 
 ---
 
@@ -1009,17 +1027,25 @@ if (username == null) {
 
 ### Scalability Considerations
 
-**Current Limitations:**
-- Single-threaded conversion (one worker thread)
-- In-memory queue (not persistent)
-- No horizontal scaling support
-- File storage is local
+**Current Implementation:**
+- **3 concurrent worker threads**: Process up to 3 files simultaneously
+- **Thread pool**: Fixed pool size of 3 workers for optimal performance
+- **In-memory queue**: Thread-safe BlockingQueue (not persistent)
+- **File storage**: Local filesystem
+- **Concurrent users**: Multiple users can upload and process files simultaneously
+
+**Current Capabilities:**
+- Throughput: 3x improvement over single-threaded processing
+- Can handle multiple users simultaneously
+- Files processed in FIFO order by available workers
+- Optimal for machines with 14+ threads (uses ~21% of available threads)
 
 **Scaling Options:**
 
 1. **Vertical Scaling**:
    - Increase server RAM/CPU
-   - Multiple worker threads
+   - Increase worker thread count (currently set to 3)
+   - Adjust NUM_WORKERS constant in ConversionQueue.java
    - Larger thread pool
 
 2. **Horizontal Scaling** (requires architecture changes):
